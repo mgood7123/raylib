@@ -492,7 +492,7 @@ static int screenshotCounter = 0;           // Screenshots counter
 #endif
 
 #if defined(SUPPORT_GIF_RECORDING)
-static int gifFrameCounter = 0;            // GIF frames counter
+static int gifFrameCounter = 0;             // GIF frames counter
 static bool gifRecording = false;           // GIF recording state
 static MsfGifState gifState = { 0 };        // MSGIF context state
 #endif
@@ -2664,7 +2664,7 @@ void TakeScreenshot(const char *fileName)
     unsigned char *imgData = rlReadScreenPixels(CORE.Window.render.width, CORE.Window.render.height);
     Image image = { imgData, CORE.Window.render.width, CORE.Window.render.height, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
 
-    char path[512] = { 0 };
+    char path[2048] = { 0 };
     strcpy(path, TextFormat("%s/%s", CORE.Storage.basePath, fileName));
 
     ExportImage(image, path);
@@ -2708,6 +2708,11 @@ bool FileExists(const char *fileName)
 #else
     if (access(fileName, F_OK) != -1) result = true;
 #endif
+
+    // NOTE: Alternatively, stat() can be used instead of access()
+    //#include <sys/stat.h>
+    //struct stat statbuf;   
+    //if (stat(filename, &statbuf) == 0) result = true;
 
     return result;
 }
@@ -2894,40 +2899,37 @@ const char *GetWorkingDirectory(void)
     return path;
 }
 
-// Get filenames in a directory path (max 512 files)
+// Get filenames in a directory path
 // NOTE: Files count is returned by parameters pointer
 char **GetDirectoryFiles(const char *dirPath, int *fileCount)
 {
-    #define MAX_DIRECTORY_FILES     512
-
     ClearDirectoryFiles();
-
-    // Memory allocation for MAX_DIRECTORY_FILES
-    dirFilesPath = (char **)RL_MALLOC(MAX_DIRECTORY_FILES*sizeof(char *));
-    for (int i = 0; i < MAX_DIRECTORY_FILES; i++) dirFilesPath[i] = (char *)RL_MALLOC(MAX_FILEPATH_LENGTH*sizeof(char));
 
     int counter = 0;
     struct dirent *entity;
     DIR *dir = opendir(dirPath);
 
-    if (dir != NULL)  // It's a directory
+    if (dir != NULL) // It's a directory
     {
-        // TODO: Reading could be done in two passes,
-        // first one to count files and second one to read names
-        // That way we can allocate required memory, instead of a limited pool
+        // Count files
+        while ((entity = readdir(dir)) != NULL) counter++; 
 
-        while ((entity = readdir(dir)) != NULL)
-        {
-            strcpy(dirFilesPath[counter], entity->d_name);
-            counter++;
-        }
+        dirFileCount = counter;
+        *fileCount = dirFileCount;
+
+        // Memory allocation for dirFileCount
+        dirFilesPath = (char **)RL_MALLOC(dirFileCount*sizeof(char *));
+        for (int i = 0; i < dirFileCount; i++) dirFilesPath[i] = (char *)RL_MALLOC(MAX_FILEPATH_LENGTH*sizeof(char));
+        
+        // Reset our position in the directory to the beginning
+        rewinddir(dir);
+
+        // Read file names
+        for (int i = 0; (entity = readdir(dir)) != NULL; i++) strcpy(dirFilesPath[i], entity->d_name);
 
         closedir(dir);
     }
     else TRACELOG(LOG_WARNING, "FILEIO: Failed to open requested directory");  // Maybe it's a file...
-
-    dirFileCount = counter;
-    *fileCount = dirFileCount;
 
     return dirFilesPath;
 }
@@ -2937,7 +2939,7 @@ void ClearDirectoryFiles(void)
 {
     if (dirFileCount > 0)
     {
-        for (int i = 0; i < MAX_DIRECTORY_FILES; i++) RL_FREE(dirFilesPath[i]);
+        for (int i = 0; i < dirFileCount; i++) RL_FREE(dirFilesPath[i]);
 
         RL_FREE(dirFilesPath);
     }
@@ -5633,8 +5635,8 @@ static void ProcessKeyboard(void)
     #define MAX_KEYBUFFER_SIZE      32      // Max size in bytes to read
 
     // Keyboard input polling (fill keys[256] array with status)
-    int bufferByteCount = 0;                // Bytes available on the buffer
-    char keysBuffer[MAX_KEYBUFFER_SIZE];    // Max keys to be read at a time
+    int bufferByteCount = 0;                        // Bytes available on the buffer
+    char keysBuffer[MAX_KEYBUFFER_SIZE] = { 0 };    // Max keys to be read at a time
 
     // Read availables keycodes from stdin
     bufferByteCount = read(STDIN_FILENO, keysBuffer, MAX_KEYBUFFER_SIZE);     // POSIX system call
