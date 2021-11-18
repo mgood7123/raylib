@@ -901,8 +901,15 @@ typedef bool (*SaveFileTextCallback)(const char *fileName, char *text);     // F
 extern "C" {            // Prevents name mangling of functions
 #endif
 
+//----------------------------------------------------------------------------------
+// Other Modules Functions Declaration (required by core)
+//----------------------------------------------------------------------------------
+extern void LoadFontDefault(void);          // [Module: text] Loads default font on InitWindow()
+extern void UnloadFontDefault(void);        // [Module: text] Unloads default font from GPU memory
+
 // Window-related functions
 RLAPI void InitWindow(int width, int height, const char *title);  // Initialize window and OpenGL context
+RLAPI void ResizeWindow(int width, int height);
 RLAPI bool WindowShouldClose(void);                               // Check if KEY_ESCAPE pressed or Close icon pressed
 RLAPI void CloseWindow(void);                                     // Close window and unload OpenGL context
 RLAPI bool IsWindowReady(void);                                   // Check if window has been initialized successfully

@@ -492,7 +492,7 @@ static int screenshotCounter = 0;           // Screenshots counter
 #endif
 
 #if defined(SUPPORT_GIF_RECORDING)
-static int gifFrameCounter = 0;            // GIF frames counter
+static int gifFrameCounter = 0;             // GIF frames counter
 static bool gifRecording = false;           // GIF recording state
 static MsfGifState gifState = { 0 };        // MSGIF context state
 #endif
@@ -2083,6 +2083,7 @@ void BeginMode3D(Camera3D camera)
     }
 
     rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
+    rlPushMatrix();
     rlLoadIdentity();               // Reset current matrix (modelview)
 
     // Setup Camera view
@@ -2095,15 +2096,18 @@ void BeginMode3D(Camera3D camera)
 // Ends 3D mode and returns to default 2D orthographic mode
 void EndMode3D(void)
 {
+    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
+    rlPopMatrix();
+
     rlDrawRenderBatchActive();      // Update and draw internal render batch
 
     rlMatrixMode(RL_PROJECTION);    // Switch to projection matrix
     rlPopMatrix();                  // Restore previous matrix (projection) from matrix stack
 
-    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
-    rlLoadIdentity();               // Reset current matrix (modelview)
 
     rlMultMatrixf(MatrixToFloat(CORE.Window.screenScale)); // Apply screen scaling if required
+
+    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
 
     rlDisableDepthTest();           // Disable DEPTH_TEST for 2D
 }
@@ -2119,6 +2123,7 @@ void BeginTextureMode(RenderTexture2D target)
     rlViewport(0, 0, target.texture.width, target.texture.height);
 
     rlMatrixMode(RL_PROJECTION);    // Switch to projection matrix
+    rlPushMatrix();
     rlLoadIdentity();               // Reset current matrix (projection)
 
     // Set orthographic projection to current framebuffer size
@@ -2126,6 +2131,7 @@ void BeginTextureMode(RenderTexture2D target)
     rlOrtho(0, target.texture.width, target.texture.height, 0, 0.0f, 1.0f);
 
     rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
+    rlPushMatrix();
     rlLoadIdentity();               // Reset current matrix (modelview)
 
     //rlScalef(0.0f, -1.0f, 0.0f);  // Flip Y-drawing (?)
@@ -2139,9 +2145,14 @@ void BeginTextureMode(RenderTexture2D target)
 // Ends drawing to render texture
 void EndTextureMode(void)
 {
+    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
+    rlPopMatrix();
     rlDrawRenderBatchActive();      // Update and draw internal render batch
 
     rlDisableFramebuffer();         // Disable render target (fbo)
+    rlMatrixMode(RL_PROJECTION);     // Switch back to modelview matrix
+    rlPopMatrix();
+    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
 
     // Set viewport to default framebuffer size
     SetupViewport(CORE.Window.render.width, CORE.Window.render.height);
@@ -2709,6 +2720,11 @@ bool FileExists(const char *fileName)
     if (access(fileName, F_OK) != -1) result = true;
 #endif
 
+    // NOTE: Alternatively, stat() can be used instead of access()
+    //#include <sys/stat.h>
+    //struct stat statbuf;
+    //if (stat(filename, &statbuf) == 0) result = true;
+
     return result;
 }
 
@@ -2894,40 +2910,37 @@ const char *GetWorkingDirectory(void)
     return path;
 }
 
-// Get filenames in a directory path (max 512 files)
+// Get filenames in a directory path
 // NOTE: Files count is returned by parameters pointer
 char **GetDirectoryFiles(const char *dirPath, int *fileCount)
 {
-    #define MAX_DIRECTORY_FILES     512
-
     ClearDirectoryFiles();
-
-    // Memory allocation for MAX_DIRECTORY_FILES
-    dirFilesPath = (char **)RL_MALLOC(MAX_DIRECTORY_FILES*sizeof(char *));
-    for (int i = 0; i < MAX_DIRECTORY_FILES; i++) dirFilesPath[i] = (char *)RL_MALLOC(MAX_FILEPATH_LENGTH*sizeof(char));
 
     int counter = 0;
     struct dirent *entity;
     DIR *dir = opendir(dirPath);
 
-    if (dir != NULL)  // It's a directory
+    if (dir != NULL) // It's a directory
     {
-        // TODO: Reading could be done in two passes,
-        // first one to count files and second one to read names
-        // That way we can allocate required memory, instead of a limited pool
+        // Count files
+        while ((entity = readdir(dir)) != NULL) counter++;
 
-        while ((entity = readdir(dir)) != NULL)
-        {
-            strcpy(dirFilesPath[counter], entity->d_name);
-            counter++;
-        }
+        dirFileCount = counter;
+        *fileCount = dirFileCount;
+
+        // Memory allocation for dirFileCount
+        dirFilesPath = (char **)RL_MALLOC(dirFileCount*sizeof(char *));
+        for (int i = 0; i < dirFileCount; i++) dirFilesPath[i] = (char *)RL_MALLOC(MAX_FILEPATH_LENGTH*sizeof(char));
+
+        // Reset our position in the directory to the beginning
+        rewinddir(dir);
+
+        // Read file names
+        for (int i = 0; (entity = readdir(dir)) != NULL; i++) strcpy(dirFilesPath[i], entity->d_name);
 
         closedir(dir);
     }
     else TRACELOG(LOG_WARNING, "FILEIO: Failed to open requested directory");  // Maybe it's a file...
-
-    dirFileCount = counter;
-    *fileCount = dirFileCount;
 
     return dirFilesPath;
 }
@@ -2937,7 +2950,7 @@ void ClearDirectoryFiles(void)
 {
     if (dirFileCount > 0)
     {
-        for (int i = 0; i < MAX_DIRECTORY_FILES; i++) RL_FREE(dirFilesPath[i]);
+        for (int i = 0; i < dirFileCount; i++) RL_FREE(dirFilesPath[i]);
 
         RL_FREE(dirFilesPath);
     }
@@ -3978,7 +3991,7 @@ static bool InitGraphicsDevice(int width, int height)
         glfwSwapInterval(1);
         TRACELOG(LOG_INFO, "DISPLAY: Trying to enable VSYNC");
     }
-    
+
     int fbWidth = CORE.Window.screen.width;
     int fbHeight = CORE.Window.screen.height;
 
@@ -4003,7 +4016,7 @@ static bool InitGraphicsDevice(int width, int height)
     CORE.Window.render.height = fbHeight;
     CORE.Window.currentFbo.width = fbWidth;
     CORE.Window.currentFbo.height = fbHeight;
-    
+
     TRACELOG(LOG_INFO, "DISPLAY: Device initialized successfully");
     TRACELOG(LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
     TRACELOG(LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
@@ -4415,7 +4428,7 @@ static bool InitGraphicsDevice(int width, int height)
         CORE.Window.render.height = CORE.Window.screen.height;
         CORE.Window.currentFbo.width = CORE.Window.render.width;
         CORE.Window.currentFbo.height = CORE.Window.render.height;
-        
+
         TRACELOG(LOG_INFO, "DISPLAY: Device initialized successfully");
         TRACELOG(LOG_INFO, "    > Display size: %i x %i", CORE.Window.display.width, CORE.Window.display.height);
         TRACELOG(LOG_INFO, "    > Screen size:  %i x %i", CORE.Window.screen.width, CORE.Window.screen.height);
@@ -4754,7 +4767,7 @@ void PollInputEvents(void)
 
     // Register previous touch states
     for (int i = 0; i < MAX_TOUCH_POINTS; i++) CORE.Input.Touch.previousTouchState[i] = CORE.Input.Touch.currentTouchState[i];
-    
+
     // Reset touch positions
     // TODO: It resets on PLATFORM_WEB the mouse position and not filled again until a move-event,
     // so, if mouse is not moved it returns a (0, 0) position... this behaviour should be reviewed!
@@ -5071,7 +5084,7 @@ static void KeyCallback(GLFWwindow *window, int key, int scancode, int action, i
         CORE.Input.Keyboard.keyPressedQueue[CORE.Input.Keyboard.keyPressedQueueCount] = key;
         CORE.Input.Keyboard.keyPressedQueueCount++;
     }
-    
+
     // Check the exit key to set close window
     if ((key == CORE.Input.Keyboard.exitKey) && (action == GLFW_PRESS)) glfwSetWindowShouldClose(CORE.Window.handle, GLFW_TRUE);
 
@@ -5633,8 +5646,8 @@ static void ProcessKeyboard(void)
     #define MAX_KEYBUFFER_SIZE      32      // Max size in bytes to read
 
     // Keyboard input polling (fill keys[256] array with status)
-    int bufferByteCount = 0;                // Bytes available on the buffer
-    char keysBuffer[MAX_KEYBUFFER_SIZE];    // Max keys to be read at a time
+    int bufferByteCount = 0;                        // Bytes available on the buffer
+    char keysBuffer[MAX_KEYBUFFER_SIZE] = { 0 };    // Max keys to be read at a time
 
     // Read availables keycodes from stdin
     bufferByteCount = read(STDIN_FILENO, keysBuffer, MAX_KEYBUFFER_SIZE);     // POSIX system call

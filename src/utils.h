@@ -40,9 +40,14 @@
     #else
         #define TRACELOGD(...) (void)0
     #endif
+
+    #define TRACELOGI(...) TraceLog(LOG_INFO, __VA_ARGS__)
+    #define TRACELOGF(...) TraceLog(LOG_FATAL, __VA_ARGS__)
 #else
     #define TRACELOG(level, ...) (void)0
     #define TRACELOGD(...) (void)0
+    #define TRACELOGI(...) (void)0
+    #define TRACELOGF(...) (void)0
 #endif
 
 //----------------------------------------------------------------------------------
