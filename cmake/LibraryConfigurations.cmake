@@ -28,11 +28,12 @@ endif()
 
 if (PLATFORM_MACOS OR PLATFORM_LINUX OR PLATFORM_WIN32)
     set(PLATFORM_DESKTOP TRUE "Desktop platform (Windows, Linux, or macOS)")
+    add_definitions(-DPLATFORM_DESKTOP)
 endif()
 
 if (PLATFORM_MACOS OR PLATFORM_IOS) # iOS too?
     if (PLATFORM_MACOS)
-        add_definitions(-DPLATFORM_DESKTOP -DPLATFORM_APPLE -DGL_SILENCE_DEPRECATION)
+        add_definitions(-DPLATFORM_APPLE -DGL_SILENCE_DEPRECATION)
         set(PLATFORM_CPP "PLATFORM_MACOS")
     else()
         add_definitions(-DPLATFORM_IOS)
@@ -86,9 +87,9 @@ elseif (${PLATFORM} MATCHES "Raspberry Pi")
     add_definitions(-DPLATFORM_RPI)
     set(PLATFORM_CPP "PLATFORM_RPI")
     set(GRAPHICS "GRAPHICS_API_OPENGL_ES2")
-    
+
     add_definitions(-D_DEFAULT_SOURCE)
-    
+
     find_library(GLESV2 brcmGLESv2 HINTS /opt/vc/lib)
     find_library(EGL brcmEGL HINTS /opt/vc/lib)
     find_library(BCMHOST bcm_host HINTS /opt/vc/lib)
@@ -99,7 +100,7 @@ elseif (${PLATFORM} MATCHES "Raspberry Pi")
 elseif (${PLATFORM} MATCHES "DRM")
     set(PLATFORM_CPP "PLATFORM_DRM")
     set(GRAPHICS "GRAPHICS_API_OPENGL_ES2")
-    
+
     add_definitions(-D_DEFAULT_SOURCE)
     add_definitions(-DEGL_NO_X11)
     add_definitions(-DPLATFORM_DRM)

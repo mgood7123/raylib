@@ -1,6 +1,8 @@
 # Setup the project and settings
 project(examples)
 
+include(LibraryConfigurations)
+
 # Directories that contain examples
 set(example_dirs
     audio
