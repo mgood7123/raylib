@@ -128,6 +128,8 @@
 #ifndef TRACELOG
     #define TRACELOG(level, ...) (void)0
     #define TRACELOGD(...) (void)0
+    #define TRACELOGI(...) (void)0
+    #define TRACELOGF(...) (void)0
 #endif
 
 // Allow custom memory allocators
@@ -498,7 +500,17 @@ typedef enum {
 extern "C" {            // Prevents name mangling of functions
 #endif
 
+#if defined(GRAPHICS_API_OPENGL_33) || defined(GRAPHICS_API_OPENGL_ES2)
+RLAPI void rlPushFramebuffer(int id); // Push the framebuffer id to stack and sets it as active
+RLAPI void rlPopFramebuffer();        // Pop lattest inserted framebuffer id from stack and sets the previous fbo as active
+#endif
+
 RLAPI void rlMatrixMode(int mode);                    // Choose the current matrix to be transformed
+RLAPI void rlMatrixModeProjection();                        // Choose the Projection matrix to be transformed
+RLAPI void rlMatrixModeModelView();                         // Choose the Model View matrix to be transformed
+#if defined(GRAPHICS_API_OPENGL_11)
+void rlMatrixModeTexture();                           // Choose the Texture matrix to be transformed
+#endif
 RLAPI void rlPushMatrix(void);                        // Push the current matrix to stack
 RLAPI void rlPopMatrix(void);                         // Pop lattest inserted matrix from stack
 RLAPI void rlLoadIdentity(void);                      // Reset current matrix to identity matrix
@@ -686,6 +698,7 @@ RLAPI Matrix rlGetMatrixProjectionStereo(int eye);                        // Get
 RLAPI Matrix rlGetMatrixViewOffsetStereo(int eye);                        // Get internal view offset matrix for stereo render (selected eye)
 RLAPI void rlSetMatrixProjection(Matrix proj);                            // Set a custom projection matrix (replaces internal projection matrix)
 RLAPI void rlSetMatrixModelview(Matrix view);                             // Set a custom modelview matrix (replaces internal modelview matrix)
+RLAPI void rlSetMatrixTransform(Matrix transform);                        // Set a custom transform matrix (replaces internal transform matrix)
 RLAPI void rlSetMatrixProjectionStereo(Matrix right, Matrix left);        // Set eyes projection matrices for stereo rendering
 RLAPI void rlSetMatrixViewOffsetStereo(Matrix right, Matrix left);        // Set eyes view offsets matrices for stereo rendering
 
@@ -888,6 +901,110 @@ RLAPI void rlLoadDrawQuad(void);     // Load and draw a quad
 // Types and Structures Definition
 //----------------------------------------------------------------------------------
 #if defined(GRAPHICS_API_OPENGL_33) || defined(GRAPHICS_API_OPENGL_ES2)
+
+// A structure to represent a stack
+struct rl_MatrixStackNode {
+    Matrix data;
+    struct rl_MatrixStackNode* next;
+};
+
+typedef struct rl_MatrixStackNode MStack;
+
+MStack* rl_Matrix_newNode(Matrix data)
+{
+    MStack* stackNode = (MStack*) RL_MALLOC(sizeof(MStack));
+    stackNode->data = data;
+    stackNode->next = NULL;
+    return stackNode;
+}
+
+void rl_Matrix_push(MStack** root, Matrix data)
+{
+    MStack* stackNode = rl_Matrix_newNode(data);
+    stackNode->next = *root;
+    *root = stackNode;
+}
+
+Matrix rl_Matrix_pop(MStack** root)
+{
+    MStack* temp = *root;
+    *root = (*root)->next;
+    Matrix popped = temp->data;
+    RL_FREE(temp);
+
+    return popped;
+}
+
+void rl_Matrix_clear(MStack** root)
+{
+    while ((*root)->next != NULL) {
+        MStack* temp = *root;
+        *root = (*root)->next;
+        RL_FREE(temp);
+    }
+}
+
+void rl_Matrix_delete(MStack** root)
+{
+    while (*root != NULL) {
+        MStack* temp = *root;
+        *root = (*root)->next;
+        RL_FREE(temp);
+    }
+}
+
+// A structure to represent a stack
+struct rl_IntStackNode {
+    int data;
+    struct rl_IntStackNode* next;
+};
+
+typedef struct rl_IntStackNode IStack;
+
+IStack* rl_Int_newNode(int data)
+{
+    IStack* stackNode =
+      (IStack*) RL_MALLOC(sizeof(IStack));
+    stackNode->data = data;
+    stackNode->next = NULL;
+    return stackNode;
+}
+
+void rl_Int_push(IStack** root, int data)
+{
+    IStack* stackNode = rl_Int_newNode(data);
+    stackNode->next = *root;
+    *root = stackNode;
+}
+
+int rl_Int_pop(IStack** root)
+{
+    IStack* temp = *root;
+    *root = (*root)->next;
+    int popped = temp->data;
+    RL_FREE(temp);
+
+    return popped;
+}
+
+void rl_IMatrix_clear(IStack** root)
+{
+    while ((*root)->next != NULL) {
+        IStack* temp = *root;
+        *root = (*root)->next;
+        RL_FREE(temp);
+    }
+}
+
+void rl_IMatrix_delete(IStack** root)
+{
+    while (*root != NULL) {
+        IStack* temp = *root;
+        *root = (*root)->next;
+        RL_FREE(temp);
+    }
+}
+
 typedef struct rlglData {
     rlRenderBatch *currentBatch;            // Current render batch
     rlRenderBatch defaultBatch;             // Default internal render batch
@@ -901,11 +1018,18 @@ typedef struct rlglData {
         int currentMatrixMode;              // Current matrix mode
         Matrix *currentMatrix;              // Current matrix pointer
         Matrix modelview;                   // Default modelview matrix
-        Matrix projection;                  // Default projection matrix
-        Matrix transform;                   // Transform matrix to be used with rlTranslate, rlRotate, rlScale
+        Matrix * projection;                // Default projection matrix
+        Matrix * transform;                 // Transform matrix to be used with rlTranslate, rlRotate, rlScale
         bool transformRequired;             // Require transform matrix application to current draw-call vertex (if required)
-        Matrix stack[RL_MAX_MATRIX_STACK_SIZE];// Matrix stack for push/pop
-        int stackCounter;                   // Matrix stack counter
+
+        MStack* stackProjection;            // Matrix projection stack for push/pop
+        int stackProjectionCounter;         // Matrix projection stack counter
+
+        MStack* stackTransform;             // Matrix transformation stack for push/pop
+        int stackTransformCounter;          // Matrix transformation stack counter
+
+        IStack* stackFBO;                   // FBO stack for push/pop
+        int stackFBOCounter;                // FBO stack counter
 
         unsigned int defaultTextureId;      // Default texture used on shapes/poly drawing (required by shader)
         unsigned int activeTextureId[RL_DEFAULT_BATCH_MAX_TEXTURE_UNITS];    // Active texture ids to be enabled on batch drawing (0 active by default)
@@ -997,6 +1121,20 @@ static Matrix rlMatrixMultiply(Matrix left, Matrix right);    // Multiply two ma
 // Module Functions Definition - Matrix operations
 //----------------------------------------------------------------------------------
 
+void rlMatrixModeProjection() {
+    rlMatrixMode(RL_PROJECTION);
+}
+
+void rlMatrixModeModelView() {
+    rlMatrixMode(RL_MODELVIEW);
+}
+
+void rlMatrixModeTexture() {
+#if defined(GRAPHICS_API_OPENGL_11)
+    rlMatrixMode(RL_TEXTURE);
+#endif
+}
+
 #if defined(GRAPHICS_API_OPENGL_11)
 // Fallback to OpenGL 1.1 function calls
 //---------------------------------------
@@ -1030,11 +1168,46 @@ void rlScalef(float x, float y, float z) { glScalef(x, y, z); }
 void rlMultMatrixf(float *matf) { glMultMatrixf(matf); }
 #endif
 #if defined(GRAPHICS_API_OPENGL_33) || defined(GRAPHICS_API_OPENGL_ES2)
+// Push the framebuffer id to stack and sets it as active
+void rlPushFramebuffer(int id)
+{
+    rl_Int_push(&RLGL.State.stackFBO, id);
+    RLGL.State.stackFBOCounter++;
+    rlEnableFramebuffer(id);
+}
+
+// Pop lattest inserted framebuffer id from stack and sets the previous fbo as active
+void rlPopFramebuffer(void)
+{
+    int fbo = 0;
+    if (RLGL.State.stackFBOCounter > 0)
+    {
+        rl_Int_pop(&RLGL.State.stackFBO);
+        RLGL.State.stackFBOCounter--;
+        if (RLGL.State.stackFBOCounter > 0) {
+            fbo = (*RLGL.State.stackFBO).data;
+        }
+    }
+    if (fbo == 0) {
+        rlDisableFramebuffer();
+    } else {
+        rlEnableFramebuffer(fbo);
+    }
+}
+
 // Choose the current matrix to be transformed
 void rlMatrixMode(int mode)
 {
-    if (mode == RL_PROJECTION) RLGL.State.currentMatrix = &RLGL.State.projection;
-    else if (mode == RL_MODELVIEW) RLGL.State.currentMatrix = &RLGL.State.modelview;
+    if (mode == RL_PROJECTION) {
+        RLGL.State.currentMatrix = &RLGL.State.stackProjection->data;
+    }
+    else if (mode == RL_MODELVIEW) {
+        if (RLGL.State.stackTransformCounter == 0) {
+            RLGL.State.currentMatrix = &RLGL.State.modelview;
+        } else {
+            RLGL.State.currentMatrix = &RLGL.State.stackTransform->data;
+        }
+    }
     //else if (mode == RL_TEXTURE) // Not supported
 
     RLGL.State.currentMatrixMode = mode;
@@ -1043,32 +1216,50 @@ void rlMatrixMode(int mode)
 // Push the current matrix into RLGL.State.stack
 void rlPushMatrix(void)
 {
-    if (RLGL.State.stackCounter >= RL_MAX_MATRIX_STACK_SIZE) TRACELOG(RL_LOG_ERROR, "RLGL: Matrix stack overflow (RL_MAX_MATRIX_STACK_SIZE)");
-
     if (RLGL.State.currentMatrixMode == RL_MODELVIEW)
     {
         RLGL.State.transformRequired = true;
-        RLGL.State.currentMatrix = &RLGL.State.transform;
+        rl_Matrix_push(&RLGL.State.stackTransform, RLGL.State.stackTransform->data);
+        RLGL.State.stackTransformCounter++;
+        RLGL.State.currentMatrix = &RLGL.State.stackTransform->data;
+        RLGL.State.transform = RLGL.State.currentMatrix;
+    } else {
+        rl_Matrix_push(&RLGL.State.stackProjection, RLGL.State.stackProjection->data);
+        RLGL.State.stackProjectionCounter++;
+        RLGL.State.currentMatrix = &RLGL.State.stackProjection->data;
+        RLGL.State.projection = RLGL.State.currentMatrix;
     }
-
-    RLGL.State.stack[RLGL.State.stackCounter] = *RLGL.State.currentMatrix;
-    RLGL.State.stackCounter++;
 }
 
 // Pop lattest inserted matrix from RLGL.State.stack
 void rlPopMatrix(void)
 {
-    if (RLGL.State.stackCounter > 0)
+    if (RLGL.State.currentMatrixMode == RL_MODELVIEW)
     {
-        Matrix mat = RLGL.State.stack[RLGL.State.stackCounter - 1];
-        *RLGL.State.currentMatrix = mat;
-        RLGL.State.stackCounter--;
-    }
+        if (RLGL.State.stackTransformCounter > 0) {
+            MStack* temp = RLGL.State.stackTransform;
+            RLGL.State.stackTransform = RLGL.State.stackTransform->next;
+            RL_FREE(temp);
+            RLGL.State.stackTransformCounter--;
 
-    if ((RLGL.State.stackCounter == 0) && (RLGL.State.currentMatrixMode == RL_MODELVIEW))
-    {
-        RLGL.State.currentMatrix = &RLGL.State.modelview;
-        RLGL.State.transformRequired = false;
+            if (RLGL.State.stackTransformCounter == 0) {
+                RLGL.State.transformRequired = false;
+                RLGL.State.currentMatrix = &RLGL.State.modelview;
+                RLGL.State.transform = NULL;
+            } else {
+                RLGL.State.currentMatrix = &RLGL.State.stackTransform->data;
+                RLGL.State.transform = RLGL.State.currentMatrix;
+            }
+        }
+    } else {
+        if (RLGL.State.stackProjectionCounter > 0) {
+            MStack* temp = RLGL.State.stackProjection;
+            RLGL.State.stackProjection = RLGL.State.stackProjection->next;
+            RL_FREE(temp);
+            RLGL.State.stackProjectionCounter--;
+            RLGL.State.currentMatrix = &RLGL.State.stackProjection->data;
+            RLGL.State.projection = RLGL.State.currentMatrix;
+        }
     }
 }
 
@@ -1309,7 +1500,8 @@ void rlEnd(void)
         // WARNING: If we are between rlPushMatrix() and rlPopMatrix() and we need to force a rlDrawRenderBatch(),
         // we need to call rlPopMatrix() before to recover *RLGL.State.currentMatrix (RLGL.State.modelview) for the next forced draw call!
         // If we have multiple matrix pushed, it will require "RLGL.State.stackCounter" pops before launching the draw
-        for (int i = RLGL.State.stackCounter; i >= 0; i--) rlPopMatrix();
+        rl_Matrix_clear(&RLGL.State.stackTransform);
+        RLGL.State.stackTransformCounter = 0;
         rlDrawRenderBatch(RLGL.currentBatch);
     }
 }
@@ -1325,9 +1517,9 @@ void rlVertex3f(float x, float y, float z)
     // Transform provided vector if required
     if (RLGL.State.transformRequired)
     {
-        tx = RLGL.State.transform.m0*x + RLGL.State.transform.m4*y + RLGL.State.transform.m8*z + RLGL.State.transform.m12;
-        ty = RLGL.State.transform.m1*x + RLGL.State.transform.m5*y + RLGL.State.transform.m9*z + RLGL.State.transform.m13;
-        tz = RLGL.State.transform.m2*x + RLGL.State.transform.m6*y + RLGL.State.transform.m10*z + RLGL.State.transform.m14;
+        tx = RLGL.State.transform[0].m0*x + RLGL.State.transform[0].m4*y + RLGL.State.transform[0].m8*z + RLGL.State.transform[0].m12;
+        ty = RLGL.State.transform[0].m1*x + RLGL.State.transform[0].m5*y + RLGL.State.transform[0].m9*z + RLGL.State.transform[0].m13;
+        tz = RLGL.State.transform[0].m2*x + RLGL.State.transform[0].m6*y + RLGL.State.transform[0].m10*z + RLGL.State.transform[0].m14;
     }
 
     // Verify that current vertex buffer elements limit has not been reached
@@ -1921,11 +2113,13 @@ void rlglInit(int width, int height)
     RLGL.currentBatch = &RLGL.defaultBatch;
 
     // Init stack matrices (emulating OpenGL 1.1)
-    for (int i = 0; i < RL_MAX_MATRIX_STACK_SIZE; i++) RLGL.State.stack[i] = rlMatrixIdentity();
+    rl_Matrix_push(&RLGL.State.stackTransform, rlMatrixIdentity());
+    rl_Matrix_push(&RLGL.State.stackProjection, rlMatrixIdentity());
+
 
     // Init internal matrices
-    RLGL.State.transform = rlMatrixIdentity();
-    RLGL.State.projection = rlMatrixIdentity();
+    RLGL.State.transform = NULL;
+    RLGL.State.projection = &RLGL.State.stackProjection->data;
     RLGL.State.modelview = rlMatrixIdentity();
     RLGL.State.currentMatrix = &RLGL.State.modelview;
 #endif  // GRAPHICS_API_OPENGL_33 || GRAPHICS_API_OPENGL_ES2
@@ -1982,6 +2176,14 @@ void rlglClose(void)
 
     glDeleteTextures(1, &RLGL.State.defaultTextureId); // Unload default texture
     TRACELOG(RL_LOG_INFO, "TEXTURE: [ID %i] Default texture unloaded successfully", RLGL.State.defaultTextureId);
+
+    // unload matrix stacks
+    rl_Matrix_delete(&RLGL.State.stackTransform);
+    rl_Matrix_delete(&RLGL.State.stackProjection);
+
+    // unload framebuffer stack
+    rl_IMatrix_delete(&RLGL.State.stackFBO);
+    rlDisableFramebuffer();
 #endif
 }
 
@@ -2183,13 +2385,12 @@ void rlLoadExtensions(void *loader)
     for (int i = 0; i < capability; i++) TRACELOG(RL_LOG_INFO, "        %s", rlGetCompressedFormatName(compFormats[i]));
     RL_FREE(compFormats);
 
-    /*
-    // Following capabilities are only supported by OpenGL 4.3 or greater
+#if defined(GRAPHICS_API_OPENGL_43)
     glGetIntegerv(GL_MAX_VERTEX_ATTRIB_BINDINGS, &capability);
     TRACELOG(RL_LOG_INFO, "    GL_MAX_VERTEX_ATTRIB_BINDINGS: %i", capability);
     glGetIntegerv(GL_MAX_UNIFORM_LOCATIONS, &capability);
     TRACELOG(RL_LOG_INFO, "    GL_MAX_UNIFORM_LOCATIONS: %i", capability);
-    */
+#endif  // GRAPHICS_API_OPENGL_43
 #else   // RLGL_SHOW_GL_DETAILS_INFO
 
     // Show some basic info about GL supported features
@@ -2450,10 +2651,12 @@ void rlUnloadRenderBatch(rlRenderBatch batch)
         RL_FREE(batch.vertexBuffer[i].colors);
         RL_FREE(batch.vertexBuffer[i].indices);
     }
+    TRACELOG(RL_LOG_INFO, "RLGL: Render batch vertex buffers unloaded successfully in VRAM (GPU)");
 
     // Unload arrays
     RL_FREE(batch.vertexBuffer);
     RL_FREE(batch.draws);
+    TRACELOG(RL_LOG_INFO, "RLGL: Render batch vertex buffers unloaded successfully in RAM (CPU)");
 #endif
 }
 
@@ -2508,7 +2711,7 @@ void rlDrawRenderBatch(rlRenderBatch *batch)
 
     // Draw batch vertex buffers (considering VR stereo if required)
     //------------------------------------------------------------------------------------------------------------
-    Matrix matProjection = RLGL.State.projection;
+    Matrix matProjection = RLGL.State.projection[0];
     Matrix matModelView = RLGL.State.modelview;
 
     int eyeCount = 1;
@@ -2534,7 +2737,7 @@ void rlDrawRenderBatch(rlRenderBatch *batch)
             glUseProgram(RLGL.State.currentShaderId);
 
             // Create modelview-projection matrix and upload to shader
-            Matrix matMVP = rlMatrixMultiply(RLGL.State.modelview, RLGL.State.projection);
+            Matrix matMVP = rlMatrixMultiply(RLGL.State.modelview, RLGL.State.projection[0]);
             float matMVPfloat[16] = {
                 matMVP.m0, matMVP.m1, matMVP.m2, matMVP.m3,
                 matMVP.m4, matMVP.m5, matMVP.m6, matMVP.m7,
@@ -2629,7 +2832,7 @@ void rlDrawRenderBatch(rlRenderBatch *batch)
     batch->currentDepth = -1.0f;
 
     // Restore projection/modelview matrices
-    RLGL.State.projection = matProjection;
+    RLGL.State.projection[0] = matProjection;
     RLGL.State.modelview = matModelView;
 
     // Reset RLGL.currentBatch->draws array
@@ -2989,7 +3192,7 @@ void rlUpdateTexture(unsigned int id, int offsetX, int offsetY, int width, int h
 
     if ((glInternalFormat != -1) && (format < RL_PIXELFORMAT_COMPRESSED_DXT1_RGB))
     {
-        glTexSubImage2D(GL_TEXTURE_2D, 0, offsetX, offsetY, width, height, glFormat, glType, (unsigned char *)data);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, offsetX, offsetY, width, height, glFormat, glType, data);
     }
     else TRACELOG(RL_LOG_WARNING, "TEXTURE: [ID %i] Failed to update for current texture format (%i)", id, format);
 }
@@ -3552,7 +3755,7 @@ void rlUnloadVertexBuffer(unsigned int vboId)
 {
 #if defined(GRAPHICS_API_OPENGL_33) || defined(GRAPHICS_API_OPENGL_ES2)
     glDeleteBuffers(1, &vboId);
-    //TRACELOG(RL_LOG_INFO, "VBO: Unloaded vertex data from VRAM (GPU)");
+    TRACELOG(RL_LOG_INFO, "VBO: Unloaded vertex data from VRAM (GPU)");
 #endif
 }
 
@@ -3918,7 +4121,7 @@ void rlComputeShaderDispatch(unsigned int groupX, unsigned int groupY, unsigned 
 unsigned int rlLoadShaderBuffer(unsigned long long size, const void *data, int usageHint)
 {
     unsigned int ssbo = 0;
-    
+
 #if defined(GRAPHICS_API_OPENGL_43)
     glGenBuffers(1, &ssbo);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
@@ -3949,7 +4152,7 @@ void rlUpdateShaderBufferElements(unsigned int id, const void *data, unsigned lo
 unsigned long long rlGetShaderBufferSize(unsigned int id)
 {
     long long size = 0;
-    
+
 #if defined(GRAPHICS_API_OPENGL_43)
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, id);
     glGetInteger64v(GL_SHADER_STORAGE_BUFFER_SIZE, &size);
@@ -4001,10 +4204,10 @@ void rlBindImageTexture(unsigned int id, unsigned int index, unsigned int format
 // Get internal modelview matrix
 Matrix rlGetMatrixModelview(void)
 {
-    Matrix matrix = rlMatrixIdentity();
 #if defined(GRAPHICS_API_OPENGL_11)
     float mat[16];
     glGetFloatv(GL_MODELVIEW_MATRIX, mat);
+    Matrix matrix;
     matrix.m0 = mat[0];
     matrix.m1 = mat[1];
     matrix.m2 = mat[2];
@@ -4021,10 +4224,10 @@ Matrix rlGetMatrixModelview(void)
     matrix.m13 = mat[13];
     matrix.m14 = mat[14];
     matrix.m15 = mat[15];
-#else
-    matrix = RLGL.State.modelview;
-#endif
     return matrix;
+#else
+    return RLGL.State.modelview;
+#endif
 }
 
 // Get internal projection matrix
@@ -4052,7 +4255,7 @@ Matrix rlGetMatrixProjection(void)
     m.m15 = mat[15];
     return m;
 #else
-    return RLGL.State.projection;
+    return RLGL.State.projection[0];
 #endif
 }
 
@@ -4065,7 +4268,9 @@ Matrix rlGetMatrixTransform(void)
     // Is this the right order? or should we start with the first stored matrix instead of the last one?
     //Matrix matStackTransform = rlMatrixIdentity();
     //for (int i = RLGL.State.stackCounter; i > 0; i--) matStackTransform = rlMatrixMultiply(RLGL.State.stack[i], matStackTransform);
-    mat = RLGL.State.transform;
+    if (RLGL.State.transform != NULL) {
+        mat = RLGL.State.transform[0];
+    }
 #endif
     return mat;
 }
@@ -4073,21 +4278,21 @@ Matrix rlGetMatrixTransform(void)
 // Get internal projection matrix for stereo render (selected eye)
 RLAPI Matrix rlGetMatrixProjectionStereo(int eye)
 {
-    Matrix mat = rlMatrixIdentity();
 #if defined(GRAPHICS_API_OPENGL_33) || defined(GRAPHICS_API_OPENGL_ES2)
-    mat = RLGL.State.projectionStereo[eye];
+    return RLGL.State.projectionStereo[eye];
+#else
+    return rlMatrixIdentity();
 #endif
-    return mat;
 }
 
 // Get internal view offset matrix for stereo render (selected eye)
 RLAPI Matrix rlGetMatrixViewOffsetStereo(int eye)
 {
-    Matrix mat = rlMatrixIdentity();
 #if defined(GRAPHICS_API_OPENGL_33) || defined(GRAPHICS_API_OPENGL_ES2)
-    mat = RLGL.State.viewOffsetStereo[eye];
+    return RLGL.State.viewOffsetStereo[eye];
+#else
+    return rlMatrixIdentity();
 #endif
-    return mat;
 }
 
 // Set a custom modelview matrix (replaces internal modelview matrix)
@@ -4098,11 +4303,21 @@ void rlSetMatrixModelview(Matrix view)
 #endif
 }
 
+// Set a custom transform matrix (replaces internal transform matrix)
+void rlSetMatrixTransform(Matrix transform)
+{
+#if defined(GRAPHICS_API_OPENGL_33) || defined(GRAPHICS_API_OPENGL_ES2)
+    if (RLGL.State.transform != NULL) {
+        RLGL.State.transform[0] = transform;
+    }
+#endif
+}
+
 // Set a custom projection matrix (replaces internal projection matrix)
 void rlSetMatrixProjection(Matrix projection)
 {
 #if defined(GRAPHICS_API_OPENGL_33) || defined(GRAPHICS_API_OPENGL_ES2)
-    RLGL.State.projection = projection;
+    RLGL.State.projection[0] = projection;
 #endif
 }
 
@@ -4405,80 +4620,75 @@ static void rlUnloadShaderDefault(void)
 // Get compressed format official GL identifier name
 static char *rlGetCompressedFormatName(int format)
 {
-    static char compName[64] = { 0 };
-    memset(compName, 0, 64);
-
     switch (format)
     {
         // GL_EXT_texture_compression_s3tc
-        case 0x83F0: strcpy(compName, "GL_COMPRESSED_RGB_S3TC_DXT1_EXT"); break;
-        case 0x83F1: strcpy(compName, "GL_COMPRESSED_RGBA_S3TC_DXT1_EXT"); break;
-        case 0x83F2: strcpy(compName, "GL_COMPRESSED_RGBA_S3TC_DXT3_EXT"); break;
-        case 0x83F3: strcpy(compName, "GL_COMPRESSED_RGBA_S3TC_DXT5_EXT"); break;
+        case 0x83F0: return "GL_COMPRESSED_RGB_S3TC_DXT1_EXT"; break;
+        case 0x83F1: return "GL_COMPRESSED_RGBA_S3TC_DXT1_EXT"; break;
+        case 0x83F2: return "GL_COMPRESSED_RGBA_S3TC_DXT3_EXT"; break;
+        case 0x83F3: return "GL_COMPRESSED_RGBA_S3TC_DXT5_EXT"; break;
         // GL_3DFX_texture_compression_FXT1
-        case 0x86B0: strcpy(compName, "GL_COMPRESSED_RGB_FXT1_3DFX"); break;
-        case 0x86B1: strcpy(compName, "GL_COMPRESSED_RGBA_FXT1_3DFX"); break;
+        case 0x86B0: return "GL_COMPRESSED_RGB_FXT1_3DFX"; break;
+        case 0x86B1: return "GL_COMPRESSED_RGBA_FXT1_3DFX"; break;
         // GL_IMG_texture_compression_pvrtc
-        case 0x8C00: strcpy(compName, "GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG"); break;
-        case 0x8C01: strcpy(compName, "GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG"); break;
-        case 0x8C02: strcpy(compName, "GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG"); break;
-        case 0x8C03: strcpy(compName, "GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG"); break;
+        case 0x8C00: return "GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG"; break;
+        case 0x8C01: return "GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG"; break;
+        case 0x8C02: return "GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG"; break;
+        case 0x8C03: return "GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG"; break;
         // GL_OES_compressed_ETC1_RGB8_texture
-        case 0x8D64: strcpy(compName, "GL_ETC1_RGB8_OES"); break;
+        case 0x8D64: return "GL_ETC1_RGB8_OES"; break;
         // GL_ARB_texture_compression_rgtc
-        case 0x8DBB: strcpy(compName, "GL_COMPRESSED_RED_RGTC1"); break;
-        case 0x8DBC: strcpy(compName, "GL_COMPRESSED_SIGNED_RED_RGTC1"); break;
-        case 0x8DBD: strcpy(compName, "GL_COMPRESSED_RG_RGTC2"); break;
-        case 0x8DBE: strcpy(compName, "GL_COMPRESSED_SIGNED_RG_RGTC2"); break;
+        case 0x8DBB: return "GL_COMPRESSED_RED_RGTC1"; break;
+        case 0x8DBC: return "GL_COMPRESSED_SIGNED_RED_RGTC1"; break;
+        case 0x8DBD: return "GL_COMPRESSED_RG_RGTC2"; break;
+        case 0x8DBE: return "GL_COMPRESSED_SIGNED_RG_RGTC2"; break;
         // GL_ARB_texture_compression_bptc
-        case 0x8E8C: strcpy(compName, "GL_COMPRESSED_RGBA_BPTC_UNORM_ARB"); break;
-        case 0x8E8D: strcpy(compName, "GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB"); break;
-        case 0x8E8E: strcpy(compName, "GL_COMPRESSED_RGB_BPTC_SIGNED_FLOAT_ARB"); break;
-        case 0x8E8F: strcpy(compName, "GL_COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT_ARB"); break;
+        case 0x8E8C: return "GL_COMPRESSED_RGBA_BPTC_UNORM_ARB"; break;
+        case 0x8E8D: return "GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB"; break;
+        case 0x8E8E: return "GL_COMPRESSED_RGB_BPTC_SIGNED_FLOAT_ARB"; break;
+        case 0x8E8F: return "GL_COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT_ARB"; break;
         // GL_ARB_ES3_compatibility
-        case 0x9274: strcpy(compName, "GL_COMPRESSED_RGB8_ETC2"); break;
-        case 0x9275: strcpy(compName, "GL_COMPRESSED_SRGB8_ETC2"); break;
-        case 0x9276: strcpy(compName, "GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2"); break;
-        case 0x9277: strcpy(compName, "GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2"); break;
-        case 0x9278: strcpy(compName, "GL_COMPRESSED_RGBA8_ETC2_EAC"); break;
-        case 0x9279: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC"); break;
-        case 0x9270: strcpy(compName, "GL_COMPRESSED_R11_EAC"); break;
-        case 0x9271: strcpy(compName, "GL_COMPRESSED_SIGNED_R11_EAC"); break;
-        case 0x9272: strcpy(compName, "GL_COMPRESSED_RG11_EAC"); break;
-        case 0x9273: strcpy(compName, "GL_COMPRESSED_SIGNED_RG11_EAC"); break;
+        case 0x9274: return "GL_COMPRESSED_RGB8_ETC2"; break;
+        case 0x9275: return "GL_COMPRESSED_SRGB8_ETC2"; break;
+        case 0x9276: return "GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2"; break;
+        case 0x9277: return "GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2"; break;
+        case 0x9278: return "GL_COMPRESSED_RGBA8_ETC2_EAC"; break;
+        case 0x9279: return "GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC"; break;
+        case 0x9270: return "GL_COMPRESSED_R11_EAC"; break;
+        case 0x9271: return "GL_COMPRESSED_SIGNED_R11_EAC"; break;
+        case 0x9272: return "GL_COMPRESSED_RG11_EAC"; break;
+        case 0x9273: return "GL_COMPRESSED_SIGNED_RG11_EAC"; break;
         // GL_KHR_texture_compression_astc_hdr
-        case 0x93B0: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_4x4_KHR"); break;
-        case 0x93B1: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_5x4_KHR"); break;
-        case 0x93B2: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_5x5_KHR"); break;
-        case 0x93B3: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_6x5_KHR"); break;
-        case 0x93B4: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_6x6_KHR"); break;
-        case 0x93B5: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_8x5_KHR"); break;
-        case 0x93B6: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_8x6_KHR"); break;
-        case 0x93B7: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_8x8_KHR"); break;
-        case 0x93B8: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_10x5_KHR"); break;
-        case 0x93B9: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_10x6_KHR"); break;
-        case 0x93BA: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_10x8_KHR"); break;
-        case 0x93BB: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_10x10_KHR"); break;
-        case 0x93BC: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_12x10_KHR"); break;
-        case 0x93BD: strcpy(compName, "GL_COMPRESSED_RGBA_ASTC_12x12_KHR"); break;
-        case 0x93D0: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR"); break;
-        case 0x93D1: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR"); break;
-        case 0x93D2: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR"); break;
-        case 0x93D3: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR"); break;
-        case 0x93D4: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR"); break;
-        case 0x93D5: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR"); break;
-        case 0x93D6: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR"); break;
-        case 0x93D7: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR"); break;
-        case 0x93D8: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR"); break;
-        case 0x93D9: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR"); break;
-        case 0x93DA: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR"); break;
-        case 0x93DB: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR"); break;
-        case 0x93DC: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR"); break;
-        case 0x93DD: strcpy(compName, "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR"); break;
-        default: strcpy(compName, "GL_COMPRESSED_UNKNOWN"); break;
+        case 0x93B0: return "GL_COMPRESSED_RGBA_ASTC_4x4_KHR"; break;
+        case 0x93B1: return "GL_COMPRESSED_RGBA_ASTC_5x4_KHR"; break;
+        case 0x93B2: return "GL_COMPRESSED_RGBA_ASTC_5x5_KHR"; break;
+        case 0x93B3: return "GL_COMPRESSED_RGBA_ASTC_6x5_KHR"; break;
+        case 0x93B4: return "GL_COMPRESSED_RGBA_ASTC_6x6_KHR"; break;
+        case 0x93B5: return "GL_COMPRESSED_RGBA_ASTC_8x5_KHR"; break;
+        case 0x93B6: return "GL_COMPRESSED_RGBA_ASTC_8x6_KHR"; break;
+        case 0x93B7: return "GL_COMPRESSED_RGBA_ASTC_8x8_KHR"; break;
+        case 0x93B8: return "GL_COMPRESSED_RGBA_ASTC_10x5_KHR"; break;
+        case 0x93B9: return "GL_COMPRESSED_RGBA_ASTC_10x6_KHR"; break;
+        case 0x93BA: return "GL_COMPRESSED_RGBA_ASTC_10x8_KHR"; break;
+        case 0x93BB: return "GL_COMPRESSED_RGBA_ASTC_10x10_KHR"; break;
+        case 0x93BC: return "GL_COMPRESSED_RGBA_ASTC_12x10_KHR"; break;
+        case 0x93BD: return "GL_COMPRESSED_RGBA_ASTC_12x12_KHR"; break;
+        case 0x93D0: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR"; break;
+        case 0x93D1: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR"; break;
+        case 0x93D2: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR"; break;
+        case 0x93D3: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR"; break;
+        case 0x93D4: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR"; break;
+        case 0x93D5: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR"; break;
+        case 0x93D6: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR"; break;
+        case 0x93D7: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR"; break;
+        case 0x93D8: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR"; break;
+        case 0x93D9: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR"; break;
+        case 0x93DA: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR"; break;
+        case 0x93DB: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR"; break;
+        case 0x93DC: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR"; break;
+        case 0x93DD: return "GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR"; break;
+        default: return "GL_COMPRESSED_UNKNOWN"; break;
     }
-
-    return compName;
 }
 #endif  // RLGL_SHOW_GL_DETAILS_INFO
 
@@ -4570,8 +4780,8 @@ static unsigned char *rlGenNextMipmapData(unsigned char *srcData, int srcWidth, 
 {
     int x2 = 0;
     int y2 = 0;
-    unsigned char prow[4];
-    unsigned char pcol[4];
+    unsigned char prow[4] = { 0 };
+    unsigned char pcol[4] = { 0 };
 
     int width = srcWidth/2;
     int height = srcHeight/2;
