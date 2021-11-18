@@ -2083,6 +2083,7 @@ void BeginMode3D(Camera3D camera)
     }
 
     rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
+    rlPushMatrix();
     rlLoadIdentity();               // Reset current matrix (modelview)
 
     // Setup Camera view
@@ -2095,18 +2096,13 @@ void BeginMode3D(Camera3D camera)
 // Ends 3D mode and returns to default 2D orthographic mode
 void EndMode3D(void)
 {
-    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
-    rlPopMatrix();
-
     rlDrawRenderBatchActive();      // Update and draw internal render batch
 
     rlMatrixMode(RL_PROJECTION);    // Switch to projection matrix
     rlPopMatrix();                  // Restore previous matrix (projection) from matrix stack
 
-
-    rlMultMatrixf(MatrixToFloat(CORE.Window.screenScale)); // Apply screen scaling if required
-
     rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
+    rlPopMatrix();                  // restore saved modelview matrix
 
     rlDisableDepthTest();           // Disable DEPTH_TEST for 2D
 }
@@ -2144,14 +2140,9 @@ void BeginTextureMode(RenderTexture2D target)
 // Ends drawing to render texture
 void EndTextureMode(void)
 {
-    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
-    rlPopMatrix();
     rlDrawRenderBatchActive();      // Update and draw internal render batch
 
     rlDisableFramebuffer();         // Disable render target (fbo)
-    rlMatrixMode(RL_PROJECTION);     // Switch back to modelview matrix
-    rlPopMatrix();
-    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
 
     // Set viewport to default framebuffer size
     SetupViewport(CORE.Window.render.width, CORE.Window.render.height);
@@ -2159,6 +2150,11 @@ void EndTextureMode(void)
     // Reset current fbo to screen size
     CORE.Window.currentFbo.width = CORE.Window.render.width;
     CORE.Window.currentFbo.height = CORE.Window.render.height;
+
+    rlMatrixMode(RL_PROJECTION);    // Switch to projection matrix
+    rlPopMatrix();
+    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
+    rlPopMatrix();
 }
 
 // Begin custom shader mode
