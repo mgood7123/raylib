@@ -672,24 +672,24 @@ void __stdcall Sleep(unsigned long msTimeout);              // Required for: Wai
 // Module Functions Definition - Window and OpenGL Context Functions
 //----------------------------------------------------------------------------------
 #if defined(PLATFORM_ANDROID)
-// To allow easier porting to android, we allow the user to define a
-// main function which we call from android_main, defined by ourselves
-extern int main(int argc, char *argv[]);
-
-void android_main(struct android_app *app)
-{
-    char arg0[] = "raylib";     // NOTE: argv[] are mutable
-    CORE.Android.app = app;
-
-    // NOTE: Return codes != 0 are skipped
-    (void)main(1, (char *[]) { arg0, NULL });
-}
-
-// NOTE: Add this to header (if apps really need it)
-struct android_app *GetAndroidApp(void)
-{
-    return CORE.Android.app;
-}
+//// To allow easier porting to android, we allow the user to define a
+//// main function which we call from android_main, defined by ourselves
+//extern int main(int argc, char *argv[]);
+//
+//void android_main(struct android_app *app)
+//{
+//    char arg0[] = "raylib";     // NOTE: argv[] are mutable
+//    CORE.Android.app = app;
+//
+//    // NOTE: Return codes != 0 are skipped
+//    (void)main(1, (char *[]) { arg0, NULL });
+//}
+//
+//// NOTE: Add this to header (if apps really need it)
+//struct android_app *GetAndroidApp(void)
+//{
+//    return CORE.Android.app;
+//}
 #endif
 
 // Initialize window and OpenGL context
@@ -2095,15 +2095,18 @@ void BeginMode3D(Camera3D camera)
 // Ends 3D mode and returns to default 2D orthographic mode
 void EndMode3D(void)
 {
+    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
+    rlPopMatrix();
+
     rlDrawRenderBatchActive();      // Update and draw internal render batch
 
     rlMatrixMode(RL_PROJECTION);    // Switch to projection matrix
     rlPopMatrix();                  // Restore previous matrix (projection) from matrix stack
 
-    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
-    rlLoadIdentity();               // Reset current matrix (modelview)
 
     rlMultMatrixf(MatrixToFloat(CORE.Window.screenScale)); // Apply screen scaling if required
+
+    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
 
     rlDisableDepthTest();           // Disable DEPTH_TEST for 2D
 }
@@ -2119,6 +2122,7 @@ void BeginTextureMode(RenderTexture2D target)
     rlViewport(0, 0, target.texture.width, target.texture.height);
 
     rlMatrixMode(RL_PROJECTION);    // Switch to projection matrix
+    rlPushMatrix();
     rlLoadIdentity();               // Reset current matrix (projection)
 
     // Set orthographic projection to current framebuffer size
@@ -2126,6 +2130,7 @@ void BeginTextureMode(RenderTexture2D target)
     rlOrtho(0, target.texture.width, target.texture.height, 0, 0.0f, 1.0f);
 
     rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
+    rlPushMatrix();
     rlLoadIdentity();               // Reset current matrix (modelview)
 
     //rlScalef(0.0f, -1.0f, 0.0f);  // Flip Y-drawing (?)
@@ -2139,9 +2144,14 @@ void BeginTextureMode(RenderTexture2D target)
 // Ends drawing to render texture
 void EndTextureMode(void)
 {
+    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
+    rlPopMatrix();
     rlDrawRenderBatchActive();      // Update and draw internal render batch
 
     rlDisableFramebuffer();         // Disable render target (fbo)
+    rlMatrixMode(RL_PROJECTION);     // Switch back to modelview matrix
+    rlPopMatrix();
+    rlMatrixMode(RL_MODELVIEW);     // Switch back to modelview matrix
 
     // Set viewport to default framebuffer size
     SetupViewport(CORE.Window.render.width, CORE.Window.render.height);
